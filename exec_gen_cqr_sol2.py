@@ -110,7 +110,7 @@ Rtest = stl_fnc(Xtest)
 Rtest_fixed = stl_fnc(Xtest_fixed)
 
 Rtest_res = Rtest.reshape((150,200)).detach().numpy()
-Rtest_fixed_res = Rtest.reshape((50,600)).detach().numpy()
+Rtest_fixed_res = Rtest_fixed.reshape((50,600)).detach().numpy()
 
 print('Clustering...')
 n_clusters = 3

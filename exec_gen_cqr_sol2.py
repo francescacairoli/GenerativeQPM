@@ -101,12 +101,16 @@ model.load_state_dict(torch.load(foldername+ "model.pth"))
 Xtrain, Ltrain = load_train_data()
 Xcal, Lcal = load_calibr_data()
 Xtest, Ltest = load_test_data()
+Xtest_fixed, _ = load_test_fixed_data()
+
 
 stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
 
 Rtest = stl_fnc(Xtest)
+Rtest_fixed = stl_fnc(Xtest_fixed)
 
 Rtest_res = Rtest.reshape((150,200)).detach().numpy()
+Rtest_fixed_res = Rtest.reshape((50,600)).detach().numpy()
 
 print('Clustering...')
 n_clusters = 3
@@ -141,9 +145,10 @@ cqr = ClustCQR(Lcal, Xcal, cal_loader, num_cal_points=60, stl_property = stl_fnc
 
 cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
 
-cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+#cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
 
 cov, eff = cqr.get_coverage_efficiency(Ltest, Rtest, cpis)
 print('CQR Coverage = ', cov)
 print('CQR Efficiency = ', eff)
 
+cqr.plot_multimodal_errorbars(Rtest_fixed_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))

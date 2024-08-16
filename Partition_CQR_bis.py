@@ -333,4 +333,76 @@ class PartitionCQR():
 		fig.savefig(plot_path+"/partition_"+extra_info+"_errorbar_merged.png")
 		plt.close()
 
+	def plot_multimodal_errorbars(self, y, qr_interval, cqr_interval, title_string, plot_path, extra_info = ''):
+		'''
+		Create barplots
+		'''
+		n_points_to_plot = 25
+		
+		self.test_hist_size = y.shape[1]
+
+		n_test_points = y.shape[0]
+		
+
+		y_resh = y[:n_points_to_plot]
+		yq = []
+		yq_out = []
+		x_rep = []
+		xline_rep = []
+		xline_rep_out = []
+		li = []
+		for i in range(n_points_to_plot):
+
+			lower_yi = np.quantile(y_resh[i], self.quantiles[0])
+			upper_yi = np.quantile(y_resh[i], self.quantiles[-1])
+			for j in range(self.test_hist_size):
+				x_rep.append(i)
+				if y_resh[i,j] <= upper_yi and y_resh[i,j] >= lower_yi:
+					yq.append(y_resh[i,j])
+					xline_rep.append(i)
+				else:
+					yq_out.append(y_resh[i,j])
+					xline_rep_out.append(i)					
+
+		n_quant = qr_interval[0].shape[1]
+
+		xline = np.arange(n_points_to_plot)
+		xline0 = np.arange(n_points_to_plot)+0.2
+		xline1 = np.arange(n_points_to_plot)+0.3
+		xline2 = np.arange(n_points_to_plot)+0.4
+
+		fig = plt.figure(figsize=(20,4))
+		#plt.scatter(xline_rep_out, yq_out, c='peachpuff', s=6, alpha = 0.25)
+		#plt.scatter(xline_rep, yq, c='orange', s=6, alpha = 0.25,label='test')
+		plt.scatter(x_rep, y_resh.flatten(), c='orange', s=6, alpha = 0.25,label='test')
+		
+		plt.plot(xline, np.zeros(n_points_to_plot), '-.', color='k')
+		
+		
+		if cqr_interval[0][0,-1] < math.inf and cqr_interval[0][0,-1] == cqr_interval[0][0,-1]:
+			cqr_med = (cqr_interval[0][:n_points_to_plot,-1]+cqr_interval[0][:n_points_to_plot,0])/2
+			cqr_dminus = cqr_med-cqr_interval[0][:n_points_to_plot,0]
+			cqr_dplus = cqr_interval[0][:n_points_to_plot,-1]-cqr_med
+			plt.errorbar(x=xline0, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'blue', fmt='none', capsize = 4,label='0')
+		
+		if cqr_interval[1][0,-1] < math.inf and cqr_interval[1][0,-1] == cqr_interval[1][0,-1]:
+			cqr_med = (cqr_interval[1][:n_points_to_plot,-1]+cqr_interval[1][:n_points_to_plot,0])/2
+			cqr_dminus = cqr_med-cqr_interval[1][:n_points_to_plot,0]
+			cqr_dplus = cqr_interval[1][:n_points_to_plot,-1]-cqr_med
+			plt.errorbar(x=xline1, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'violet', fmt='none', capsize = 4,label='1')
+
+		if cqr_interval[2][0,-1] < math.inf and cqr_interval[2][0,-1] == cqr_interval[2][0,-1]:
+			cqr_med = (cqr_interval[2][:n_points_to_plot,-1]+cqr_interval[2][:n_points_to_plot,0])/2
+			cqr_dminus = cqr_med-cqr_interval[2][:n_points_to_plot,0]
+			cqr_dplus = cqr_interval[2][:n_points_to_plot,-1]-cqr_med
+			plt.errorbar(x=xline2, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'darkviolet', fmt='none', capsize = 4,label='2')
+
+		plt.ylabel('robustness')
+		plt.title(title_string)
+		plt.legend()
+		plt.grid(True)
+		plt.tight_layout()
+		fig.savefig(plot_path+"/partition_"+extra_info+"_multimodal_errorbar.png")
+		plt.close()
+
 	

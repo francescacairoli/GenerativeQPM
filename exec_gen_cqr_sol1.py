@@ -82,6 +82,8 @@ train_loader, test_loader, cal_loader = get_dataloader(
 	scaling_flag=args.scaling_flag
 )
 
+
+
 model = absCSDI(config, args.device,target_dim=args.target_dim).to(args.device)
 print(f'Loading the pre-trained model with id {args.modelfolder}..')
 model.load_state_dict(torch.load(foldername+ "model.pth"))
@@ -90,16 +92,23 @@ model.load_state_dict(torch.load(foldername+ "model.pth"))
 Xtrain, _ = load_train_data()
 Xcal, _ = load_calibr_data()
 Xtest, _ = load_test_data()
+Xtest_fixed, _ = load_test_fixed_data()
 
 stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
 
 Rtest = stl_fnc(Xtest)
+Rtest_fixed = stl_fnc(Xtest_fixed)
 
-Rtest_res = Rtest.reshape((150,200)).detach().numpy()
+print(Rtest.shape)
+print(Rtest_fixed.shape)
 
-print('Avg rob mode 0', np.mean(Rtest_res[:50]))
-print('Avg rob mode 1', np.mean(Rtest_res[50:100]))
-print('Avg rob mode 2', np.mean(Rtest_res[100:]))
+#Rtest_res = Rtest.reshape((150,200)).detach().numpy()
+
+Rtest_fixed_res = Rtest_fixed.reshape((50,600)).detach().numpy()
+
+print('Avg rob mode 0', np.mean(Rtest_fixed_res[-1,:200]))
+print('Avg rob mode 1', np.mean(Rtest_fixed_res[-1,200:400]))
+print('Avg rob mode 2', np.mean(Rtest_fixed_res[-1,400:]))
 
 if False:
 	plot_partition((Xtrain,Xcal,Xtest), crossroad_partition, foldername)
@@ -116,4 +125,6 @@ cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
 cov, eff = cqr.get_coverage_efficiency(test_classes, Rtest, cpis)
 print('CQR Coverage = ', cov)
 print('CQR Efficiency = ', eff)
-cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+cqr.plot_multimodal_errorbars(Rtest_fixed_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+
+#cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))

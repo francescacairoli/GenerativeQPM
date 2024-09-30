@@ -20,8 +20,8 @@ from main_model import absCSDI
 from csdi_utils import *
 
 from kmeans import *
+from NNClassifier import *
 
-from ICP_Classification import *
 from Clust_CQR_bis import *
 
 cuda = True if torch.cuda.is_available() else False
@@ -45,6 +45,7 @@ parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--property_idx", type=int, default=1)
 parser.add_argument("--scaling_flag", type=eval, default=True)
 parser.add_argument("--load", default=True, type=eval)
+parser.add_argument("--classifier", default=True, type=eval, help=" True = NN classif, False = kmeans") 
 parser.add_argument("--alpha", type=float, default=0.05)
 args = parser.parse_args()
 print(args)
@@ -78,6 +79,10 @@ else:
     foldername = f"./save/{args.model_name}/ID_{args.modelfolder}/"
     os.makedirs(foldername, exist_ok=True)
 
+if args.classifier:
+	from ICP_NNClassification import *
+else:
+	from ICP_Classification import *
 
 # load datasets and dataloaders
 train_loader, test_loader, cal_loader = get_dataloader(
@@ -103,6 +108,7 @@ Xcal, Lcal = load_calibr_data()
 Xtest, Ltest = load_test_data()
 Xtest_fixed, _ = load_test_fixed_data()
 
+print("Xtrain.shape=", Xtrain.shape)
 
 stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
 
@@ -113,21 +119,35 @@ Rtest_res = Rtest.reshape((150,200)).detach().numpy()
 Rtest_fixed_res = Rtest_fixed.reshape((50,600)).detach().numpy()
 
 print('Clustering...')
-n_clusters = 3
-kmeans = KMeans(n_clusters = n_clusters, max_iter=100000)
-kmeans.fit(Xtrain)
+if args.classifier:
+	classif_id = 'CNN'
+	class_path = 'trajectory_classifier_model_100epochs.pth'
+	classif = TrajectoryClassifier1D()
+	classif.load_state_dict(torch.load(class_path))
+	classif.eval()
 
-def inferred_crossroad_partition(x):
-	_, y = kmeans.evaluate(x)
-	return y
+	def inferred_crossroad_partition(x):
+		pred_lkh = classif(torch.tensor(x))
+		y = torch.argmax(pred_lkh, dim=1)
+
+		return y
+else:
+	classif_id = 'kmeans'
+	n_clusters = 3
+	classif = KMeans(n_clusters = n_clusters, max_iter=100000)
+	classif.fit(Xtrain)
+
+	def inferred_crossroad_partition(x):
+		_, y = classif.evaluate(x)
+		return y
 
 if True:
-	plot_partition((Xtrain,Xcal,Xtest), inferred_crossroad_partition, foldername, extra='kmeans_')
+	plot_partition((Xtrain,Xcal,Xtest), inferred_crossroad_partition, foldername, extra=classif_id+'_')
 
 
 print('CP Classification over clustering')
 # perform conformal inference over the classification problem
-cp_class = ICP_Classification(Xc=Xcal, Lc=Lcal, trained_model=kmeans, num_classes=3, alpha= args.alpha, plots_path = foldername)
+cp_class = ICP_Classification(Xc=Xcal, Lc=Lcal, trained_model=classif, num_classes=3, alpha= args.alpha, plots_path = foldername)
 cp_class.set_calibration_scores()
 
 class_cpi = cp_class.get_prediction_region(Xtest)

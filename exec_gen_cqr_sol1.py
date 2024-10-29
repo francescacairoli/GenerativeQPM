@@ -1,6 +1,6 @@
 import os
 import sys
-import pickle
+import dill as pickle
 import argparse
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ parser.add_argument('--device', default='cuda:0', help='Device for Attack')
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--testmissingratio", type=float, default=-1.0)
 parser.add_argument("--nfold", type=int, default=0, help="for 5fold test (valid value:[0-4])")
-parser.add_argument("--model_name", type=str, default="MM")
+parser.add_argument("--model_name", type=str, default="crossroad")
 parser.add_argument("--unconditional", type=eval, default=False)#, action="store_true"
 parser.add_argument("--modelfolder", type=str, default="")
 parser.add_argument("--nsample", type=int, default=1)
@@ -44,16 +44,20 @@ parser.add_argument("--batch_size", type=int, default=64)
 parser.add_argument("--property_idx", type=int, default=1)
 parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--scaling_flag", type=eval, default=True)
-parser.add_argument("--load", default=True, type=eval)
+parser.add_argument("--load", default=False, type=eval)
+parser.add_argument("--calload", default=False, type=eval)
 parser.add_argument("--epsilon", type=float, default=0.1)
+parser.add_argument("--nb_trajs_to_plot", type=int, default=100)
+
 args = parser.parse_args()
-print(args)
+
 
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
 args = get_model_details(args)
 
+print(args)
 path = "config/" + args.config
 with open(path, "r") as f:
 	config = yaml.safe_load(f)
@@ -66,8 +70,32 @@ config["model"]["is_unconditional"] = args.unconditional
 config["model"]["test_missing_ratio"] = args.testmissingratio
 
 print(json.dumps(config, indent=4))
+print(config)
 
 foldername = f"./save/{args.model_name}/ID_{args.modelfolder}/"
+
+Xtrain, train_classes = load_train_data(args.model_name)
+Xcal, cal_classes = load_calibr_data(args.model_name)
+Xtest, test_classes = load_test_data(args.model_name)
+#Xtest_fixed, _ = load_test_fixed_data(args.model_name)
+
+#cal_classes = cal_classes.detach().cpu().numpy()
+#test_classes = test_classes.detach().cpu().numpy()
+print('data loaded !')
+
+#CQR with GENERATIVE MODEL
+if args.model_name == 'crossroad':
+	
+	partition_fnc = lambda x: crossroad_partition(x)
+	Nclasses = 3
+elif args.model_name == 'navigator': # Navigator
+	
+	partition_fnc = lambda x: navigator_partition(x)
+	Nclasses = 4
+else: # signal
+	
+	partition_fnc = lambda x: signal_partition(x)
+	Nclasses = 3
 
 
 # load datasets and dataloaders
@@ -79,52 +107,73 @@ train_loader, test_loader, cal_loader = get_dataloader(
 	nfold=args.nfold,
 	batch_size=config["train"]["batch_size"],
 	missing_ratio=config["model"]["test_missing_ratio"],
-	scaling_flag=args.scaling_flag
+	scaling_flag=args.scaling_flag,
 )
 
 
-
 model = absCSDI(config, args.device,target_dim=args.target_dim).to(args.device)
+
 print(f'Loading the pre-trained model with id {args.modelfolder}..')
 model.load_state_dict(torch.load(foldername+ "model.pth"))
 
 
-Xtrain, _ = load_train_data()
-Xcal, _ = load_calibr_data()
-Xtest, _ = load_test_data()
-Xtest_fixed, _ = load_test_fixed_data()
 
-stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+if args.model_name == 'crossroad':
+	stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+elif args.model_name == 'navigator':
+	stl_fnc = lambda trajs: eval_navigator_property(trajs, prop_idx = args.property_idx)
+else:  #signal
+	stl_fnc = lambda trajs: eval_signal_property(trajs)
+
+
+Ncal = 600
+Ntest = 200
+Ntrajs = 300
 
 Rtest = stl_fnc(Xtest)
-Rtest_fixed = stl_fnc(Xtest_fixed)
+Rtest_res = Rtest.reshape((Ntest,Ntrajs)).detach().cpu().numpy()
 
-print(Rtest.shape)
-print(Rtest_fixed.shape)
+if True:
+	plot_partition((Xtrain,Xcal,Xtest), partition_fnc, foldername, args.model_name, args.property_idx, args.nb_trajs_to_plot, args.gridmap)
+	plot_trajs_with_robustness(Xtest, Rtest, f'./save/{args.model_name}', args.model_name, args.property_idx, args.nb_trajs_to_plot, args.gridmap)
 
-#Rtest_res = Rtest.reshape((150,200)).detach().numpy()
+	print('Plotting done!')
 
-Rtest_fixed_res = Rtest_fixed.reshape((50,600)).detach().numpy()
+res_path = foldername+f'{args.model_name}_sol1_results_property={args.property_idx}.pickle'
+if not args.calload:
+	
 
-print('Avg rob mode 0', np.mean(Rtest_fixed_res[-1,:200]))
-print('Avg rob mode 1', np.mean(Rtest_fixed_res[-1,200:400]))
-print('Avg rob mode 2', np.mean(Rtest_fixed_res[-1,400:]))
+	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
 
-if False:
-	plot_partition((Xtrain,Xcal,Xtest), crossroad_partition, foldername)
+	cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
+
+	cov, eff = cqr.get_coverage_efficiency(test_classes, Rtest, cpis)
+	print('CQR Coverage = ', cov)
+	print('CQR Efficiency = ', eff)
+
+	results = {'Rtest': Rtest, 'Rtest_res': Rtest_res,'calibr_scores': cqr.calibr_scores, 'pis': pis, 'cpis': cpis, 'cov': cov, 'eff': eff}
+
+	with open(res_path, 'wb') as file:
+		pickle.dump(results, file)
+
+	cqr.plot_multimodal_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)
 
 
-#CQR with GENERATIVE MODEL
-cal_classes = crossroad_partition(Xcal)
-test_classes = crossroad_partition(Xtest)
+else:
 
-cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=120, stl_property = stl_fnc, partition_fnc=crossroad_partition, trained_generator=model, num_classes=3, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername)
+	with open(res_path, 'rb') as file:
+		D = pickle.load(file)
 
-cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
+	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	
+	eqr = cqr.get_eqr(Rtest_res)
+	print('EQR = ', eqr)
+	pi_cov, pi_eff = cqr.get_global_coverage_efficiency(test_classes, Rtest, D['pis'])
+	print('PI Coverage = ', pi_cov)
+	print('PI Efficiency = ', pi_eff)
 
-cov, eff = cqr.get_coverage_efficiency(test_classes, Rtest, cpis)
-print('CQR Coverage = ', cov)
-print('CQR Efficiency = ', eff)
-cqr.plot_multimodal_errorbars(Rtest_fixed_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
-
-#cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+	cpi_cov, cpi_eff = cqr.get_global_coverage_efficiency(test_classes, Rtest, D['cpis'])
+	print('CPI Coverage = ', cpi_cov)
+	print('CPI Efficiency = ', cpi_eff)
+	
+	#cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)

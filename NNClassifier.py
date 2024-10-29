@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn.functional as F
 # Definiamo la classe del modello (come già fatto)
 class TrajectoryClassifier1D(nn.Module):
-    def __init__(self):
+    def __init__(self, n_classes):
         super(TrajectoryClassifier1D, self).__init__()
         
         # Convolutional layers
@@ -16,7 +16,7 @@ class TrajectoryClassifier1D(nn.Module):
         
         # Fully connected layers
         self.fc1 = nn.Linear(64, 128)
-        self.fc2 = nn.Linear(128, 3)
+        self.fc2 = nn.Linear(128, n_classes)
         
         # Dropout layer for regularization
         self.dropout = nn.Dropout(0.5)

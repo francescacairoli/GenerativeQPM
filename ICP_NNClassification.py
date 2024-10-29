@@ -37,8 +37,11 @@ class ICP_Classification():
 
 		cal_lkh = self.trained_model(torch.tensor(self.Xc)).detach().numpy()
 
-		# distance of every calibr trajectory to its assigned centroid
-		cal_dist = (1 - cal_lkh[:,self.Lc]).flatten() #[n_cal_points*num_cal_trajs,]
+		n = cal_lkh.shape[0]
+		cal_dist = np.empty(n)
+		for i in range(n):
+			cal_dist[i] = 1 - cal_lkh[i,self.Lc[i]]
+		
 		self.calibr_scores = np.sort(cal_dist)[::-1]
 		
 		fig = plt.figure()
@@ -67,14 +70,17 @@ class ICP_Classification():
 		n_points = x.shape[0]
 		
 		p_values = np.zeros((n_points, self.num_classes))
-		 
+		
+		#print('self.num_classes = ', self.num_classes)
 		
 		A =  np.zeros((n_points, self.num_classes))			
 		for k in range(self.num_classes):
-
+			#print(f'A {k+1}/{self.num_classes}')
 			A[:,k] = self.get_nonconformity_scores(class_index=k, x=x)
 			
 		for i in range(n_points):
+			#if (i+1)%500 == 0:
+			#	print(f'p {i+1}/{n_points}')
 			Ca = np.zeros(self.num_classes)
 			Cb = np.zeros(self.num_classes)
 			for k in range(self.num_classes):

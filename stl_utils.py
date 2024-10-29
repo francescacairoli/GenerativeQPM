@@ -8,6 +8,22 @@ import numpy as np
 print("CUDA availabe = " + str(torch.cuda.is_available()))
 device = torch.device("cuda") 
 
+def eval_signal_property(signal):
+
+	signal = signal.transpose(0,2,1)
+	n_timesteps = signal.shape[2]
+	
+
+	atom = stl.Atom(var_index=1, threshold=17.5, lte=False) # lte = True is <=
+	
+	glob = stl.Globally(atom, unbound=True, time_bound=n_timesteps-1)
+
+	formula = stl.Eventually(glob, unbound=False, time_bound=n_timesteps-1)
+
+	satisf = formula.quantitative(torch.tensor(signal))
+	return satisf
+
+
 def eval_crossroad_property(signal, prop_idx = 1):
 
 	signal = signal.transpose(0,2,1)
@@ -38,6 +54,62 @@ def eval_crossroad_property(signal, prop_idx = 1):
 	return satisf
 
 
+def _signal_norm(x, center):
+
+	return torch.norm(x-center.unsqueeze(2),np.inf, dim=1).unsqueeze(1).to(device)
+
+
+def eval_navigator_property(signal, prop_idx=1):#, mins, maxs
+
+	signal = signal.transpose(0,2,1)
+	n_timesteps = signal.shape[2]
+	
+	C1, R1 = [[7.5,22.5]], 2.5
+	C2, R2 = [[13., 13.]], 3.
+	C3, R3 = [[22.5,7.5]], 2.5
+	C4, R4 = [[19.,21.]], 2.
+
+	safety_1 = stl.Atom(var_index=2, threshold=R1, lte = False)
+	safety_2 = stl.Atom(var_index=3, threshold=R2, lte = False)
+	safety_3 = stl.Atom(var_index=4, threshold=R3, lte = False)
+	safety_4 = stl.Atom(var_index=5, threshold=R4, lte = False)
+	
+	and_12 = stl.And(safety_1, safety_2)
+	and_34 = stl.And(safety_3, safety_4)
+	safe_and = stl.And(and_12, and_34)
+
+	and_24 = stl.And(safety_2, safety_4)
+
+		
+	atom_xu = stl.Atom(var_index=0, threshold=30, lte=True)
+	atom_xl = stl.Atom(var_index=0, threshold=0, lte=False)
+	atom_yu = stl.Atom(var_index=1, threshold=30, lte=True)
+	atom_yl = stl.Atom(var_index=1, threshold=0, lte=False)
+
+	and_x = stl.And(atom_xl, atom_xu)
+	and_y = stl.And(atom_yl, atom_yu)
+	and_xy = stl.And(and_x, and_y)
+
+	
+	
+	if prop_idx == 1:
+		and_all = stl.And(and_xy, safe_and)
+	elif prop_idx == 2:
+		and_all = stl.And(and_xy, and_24)
+	else:
+		and_all = stl.And(and_xy, safety_1)
+
+	formula = stl.Globally(and_all, unbound=True)
+	rescaled_signal = torch.tensor(signal,device=device)
+	
+	sign_obs1 = _signal_norm(rescaled_signal,torch.tensor(C1,device=device))
+	sign_obs2 = _signal_norm(rescaled_signal,torch.tensor(C2,device=device))
+	sign_obs3 = _signal_norm(rescaled_signal,torch.tensor(C3,device=device))
+	sign_obs4 = _signal_norm(rescaled_signal,torch.tensor(C4,device=device))
+
+	concat_signal = torch.cat((rescaled_signal, sign_obs1, sign_obs2, sign_obs3, sign_obs4), dim=1)
+
+	return formula.quantitative(concat_signal)
 
 
 

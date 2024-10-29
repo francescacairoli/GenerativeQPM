@@ -1,6 +1,6 @@
 import os
 import sys
-import pickle
+import dill as pickle
 import argparse
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ parser.add_argument('--device', default='cuda:0', help='Device for Attack')
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--testmissingratio", type=float, default=-1.0)
 parser.add_argument("--nfold", type=int, default=0, help="for 5fold test (valid value:[0-4])")
-parser.add_argument("--model_name", type=str, default="MM")
+parser.add_argument("--model_name", type=str, default="clustering")
 parser.add_argument("--unconditional", type=eval, default=False)#, action="store_true"
 parser.add_argument("--modelfolder", type=str, default="")
 parser.add_argument("--nsample", type=int, default=1)
@@ -44,7 +44,8 @@ parser.add_argument("--batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--property_idx", type=int, default=1)
 parser.add_argument("--scaling_flag", type=eval, default=True)
-parser.add_argument("--load", default=True, type=eval)
+parser.add_argument("--load", default=False, type=eval)
+parser.add_argument("--calload", default=False, type=eval)
 parser.add_argument("--classifier", default=True, type=eval, help=" True = NN classif, False = kmeans") 
 parser.add_argument("--alpha", type=float, default=0.05)
 args = parser.parse_args()
@@ -103,26 +104,37 @@ model.load_state_dict(torch.load(foldername+ "model.pth"))
 
 ### CLUSTERING
 
-Xtrain, Ltrain = load_train_data()
-Xcal, Lcal = load_calibr_data()
-Xtest, Ltest = load_test_data()
-Xtest_fixed, _ = load_test_fixed_data()
+Xtrain, Ltrain = load_train_data(args.model_name)
+Xcal, Lcal = load_calibr_data(args.model_name)
+Xtest, Ltest = load_test_data(args.model_name)
 
-print("Xtrain.shape=", Xtrain.shape)
+if args.model_name == 'crossroad':
+	stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+elif args.model_name == 'navigator':
+	stl_fnc = lambda trajs: eval_navigator_property(trajs, prop_idx = args.property_idx)
+else:  #signal
+	stl_fnc = lambda trajs: eval_signal_property(trajs)
 
-stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+
+Ncal = 600
+Ntest = 200
+Ntrajs = 300
 
 Rtest = stl_fnc(Xtest)
-Rtest_fixed = stl_fnc(Xtest_fixed)
+Rtest_res = Rtest.reshape((Ntest,Ntrajs)).detach().cpu().numpy()
 
-Rtest_res = Rtest.reshape((150,200)).detach().numpy()
-Rtest_fixed_res = Rtest_fixed.reshape((50,600)).detach().numpy()
+
+
+if args.model_name == 'navigator':
+    nclasses = 4
+else:
+    nclasses = 3
 
 print('Clustering...')
 if args.classifier:
 	classif_id = 'CNN'
-	class_path = 'trajectory_classifier_model_100epochs.pth'
-	classif = TrajectoryClassifier1D()
+	class_path = f'./save/{args.model_name}/trajectory_classifier_model_20epochs.pth'
+	classif = TrajectoryClassifier1D(nclasses)
 	classif.load_state_dict(torch.load(class_path))
 	classif.eval()
 
@@ -141,34 +153,72 @@ else:
 		_, y = classif.evaluate(x)
 		return y
 
-if True:
-	plot_partition((Xtrain,Xcal,Xtest), inferred_crossroad_partition, foldername, extra=classif_id+'_')
+if False:
+	if args.model_name == 'crossroad':
+		plot_partition((Xtrain,Xcal,Xtest), crossroad_partition, foldername)
+	elif args.model_name == 'navigator':
+		plot_partition((Xtrain,Xcal,Xtest), navigator_partition, foldername)
+	else: #signal
+		plot_partition((Xtrain,Xcal,Xtest), signal_partition, foldername)
 
 
-print('CP Classification over clustering')
-# perform conformal inference over the classification problem
-cp_class = ICP_Classification(Xc=Xcal, Lc=Lcal, trained_model=classif, num_classes=3, alpha= args.alpha, plots_path = foldername)
-cp_class.set_calibration_scores()
+res_path = foldername+f'/{args.model_name}_sol2_results_property={args.property_idx}_classif={args.classifier}.pickle'
+if not args.calload:
 
-class_cpi = cp_class.get_prediction_region(Xtest)
+	
+	print('1. CP Classification over clustering')
+	# perform conformal inference over the classification problem
+	cp_class = ICP_Classification(Xc=Xcal, Lc=Lcal, trained_model=classif, num_classes=nclasses, alpha= args.alpha, plots_path = foldername)
+	cp_class.set_calibration_scores()
 
-class_cov = cp_class.get_coverage(class_cpi, Ltest)
-print('Classification coverage = ', class_cov)
-class_eff = cp_class.get_efficiency(class_cpi)
-print('Classification get_efficiency = ', class_eff)
+	if False:
+		class_cpi = cp_class.get_prediction_region(Xtest)
 
+		class_cov = cp_class.get_coverage(class_cpi, Ltest)
+		print('Classification coverage = ', class_cov)
+		class_eff = cp_class.get_efficiency(class_cpi)
+		print('Classification get_efficiency = ', class_eff)
+	
 
-#CQR with GENERATIVE MODEL
+	#CQR with GENERATIVE MODEL
 
+	print('2. CQR over generative model with STL')
 
-cqr = ClustCQR(Lcal, Xcal, cal_loader, num_cal_points=60, stl_property = stl_fnc, cp_classifier=cp_class, trained_generator=model, num_classes=3, opt=args, quantiles = [0.025, 0.975], plots_path=foldername)
+	cqr = ClustCQR(Lcal, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, cp_classifier=cp_class, trained_generator=model, num_classes=nclasses, opt=args, quantiles = [0.025, 0.975], plots_path=foldername, load=args.load, nsamples=args.nsample)
 
-cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
+	cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
 
-#cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+	#cqr.plot_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
 
-cov, eff = cqr.get_coverage_efficiency(Ltest, Rtest, cpis)
-print('CQR Coverage = ', cov)
-print('CQR Efficiency = ', eff)
+	cov, eff = cqr.get_coverage_efficiency(Ltest, Rtest, cpis)
+	print('CQR Coverage = ', cov)
+	print('CQR Efficiency = ', eff)
+	results = {'Rtest': Rtest, 'Rtest_res': Rtest_res,'calibr_scores': cqr.calibr_scores, 'pis': pis, 'cpis': cpis, 'cov': cov, 'eff': eff}
 
-cqr.plot_multimodal_errorbars(Rtest_fixed_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx))
+	with open(res_path, 'wb') as file:
+		pickle.dump(results, file)
+
+	cqr.plot_multimodal_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)
+
+else:
+
+	with open(res_path, 'rb') as file:
+		D = pickle.load(file)
+
+	cp_class = ICP_Classification(Xc=Xcal, Lc=Lcal, trained_model=classif, num_classes=nclasses, alpha= args.alpha, plots_path = foldername)
+	cqr = ClustCQR(Lcal, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, cp_classifier=cp_class, trained_generator=model, num_classes=3, opt=args, quantiles = [0.025, 0.975], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	
+	eqr = cqr.get_eqr(Rtest_res)
+	print('EQR = ', eqr)
+	pi_cov, pi_eff = cqr.get_global_coverage_efficiency(Ltest, Rtest, D['pis'])
+	print('PI Coverage = ', pi_cov)
+	print('PI Efficiency = ', pi_eff)
+
+	cpi_cov, cpi_eff = cqr.get_global_coverage_efficiency(Ltest, Rtest, D['cpis'])
+	print('CPI Coverage = ', cpi_cov)
+	print('CPI Efficiency = ', cpi_eff)
+	
+	with open(res_path, 'rb') as file:
+		D = pickle.load(file)
+	
+	#cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)

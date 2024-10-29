@@ -1,38 +1,45 @@
 from NNClassifier import *
 from data_utils import *
+import argparse
 
-# Hyperparametri
-batch_size = 128
-num_epochs = 100
-learning_rate = 0.001
+parser = argparse.ArgumentParser()
+parser.add_argument('--device', default='cuda:0', help='Device for Attack')
+parser.add_argument("--seed", type=int, default=1)
+parser.add_argument("--model_name", type=str, default="crossroad")
+parser.add_argument("--modelfolder", type=str, default="")
+parser.add_argument("--nepochs", type=int, default=100)
+parser.add_argument("--batch_size", type=int, default=128)
+parser.add_argument("--lr", type=float, default=0.001)
+parser.add_argument("--scaling_flag", type=eval, default=True)
+parser.add_argument("--load", default=False, type=eval)
+args = parser.parse_args()
+print(args)
 
-# Funzione per generare dati di esempio (random)
- #def generate_dummy_data(num_samples=1000, sequence_length=50):
- #   X = np.random.randn(num_samples, sequence_length, 2).astype(np.float32)  # Traiettorie casuali
- #   y = np.random.randint(0, 3, size=num_samples).astype(np.int64)  # Classi (-1, 0, 1 -> mappate a 0, 1, 2)
- #   return torch.tensor(X), torch.tensor(y)
 
 # Generazione dei dati di esempio
-X_train, y_train = load_train_data()
-X_val, y_val = load_test_data()
-
-print('shapes = ', X_train.shape, X_val.shape)
+X_train, y_train = load_train_data(args.model_name)
+X_val, y_val = load_test_data(args.model_name)
 
 # Creazione dei DataLoader per il training e la validazione
 train_dataset = TensorDataset(torch.tensor(X_train), torch.tensor(y_train))
 val_dataset = TensorDataset(torch.tensor(X_val), torch.tensor(y_val))
 
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
+if args.model_name == 'navigator':
+    nclasses = 4
+else:
+    nclasses = 3
+print('---nclasses = ', nclasses)
 # Inizializzazione del modello, ottimizzatore e funzione di perdita
-model = TrajectoryClassifier1D()
+model = TrajectoryClassifier1D(nclasses)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 # Funzione per il ciclo di allenamento
-def train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs):
-    for epoch in range(num_epochs):
+def train_model(model, train_loader, val_loader, criterion, optimizer):
+    for epoch in range(args.nepochs):
         model.train()
         running_loss = 0.0
         correct_train = 0
@@ -74,16 +81,20 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
         # Stampa dei risultati per epoca
         train_accuracy = 100 * correct_train / total_train
         val_accuracy = 100 * correct_val / total_val
-        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, '
+        print(f'Epoch [{epoch+1}/{args.nepochs}], Loss: {running_loss/len(train_loader):.4f}, '
               f'Train Accuracy: {train_accuracy:.2f}%, Val Loss: {val_loss/len(val_loader):.4f}, '
               f'Val Accuracy: {val_accuracy:.2f}%')
     
-    model_path = f'./trajectory_classifier_model_{num_epochs}epochs.pth'  # Nome del file in cui salvare il modello
+    model_path = f'./save/{args.model_name}/trajectory_classifier_model_{args.nepochs}epochs.pth'
     torch.save(model.state_dict(), model_path)
     print(f'Modello salvato in {model_path}')
 
 # Allenamento del modello
-train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs)
+if args.load:
+    model_path = f'./save/{args.model_name}/trajectory_classifier_model_{args.nepochs}epochs.pth'
+    model.load_state_dict(torch.load(model_path))
+else:
+    train_model(model, train_loader, val_loader, criterion, optimizer)
 
 def test_model(model, test_loader, criterion):
     model.eval()  # Impostiamo il modello in modalità di valutazione
@@ -119,7 +130,7 @@ def test_model(model, test_loader, criterion):
 # Esempio di utilizzo della funzione di test
 # Supponiamo che abbiamo un test_loader con dati di test simile al train_loader
 test_dataset = TensorDataset(torch.tensor(X_val), torch.tensor(y_val))
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
 # Chiamata della funzione di test
 test_model(model, test_loader, criterion)

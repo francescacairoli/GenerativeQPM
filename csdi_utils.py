@@ -539,14 +539,15 @@ def plot_histograms(opt, foldername, dataloader, nsample, idx='test'):
 def get_quantile(samples,q,dim=1):
     return torch.quantile(samples,q,dim=dim).cpu().numpy()
 
-def plot_rescaled_crossroads(opt, foldername, dataloader, nsample, idx = 'test'):
+def plot_rescaled_planners(opt, foldername, dataloader, nsample, idx = 'test'):
     plt.rcParams.update({'font.size': 25})
 
-    print('Plotting crossroad...')
+    print(f'Plotting {opt.model_name}...')
     path = foldername+'generated_'+idx+'_reshaped_outputs_nsample' + str(nsample) + '.pk' 
     with open(path, 'rb') as f:
         samples, target = pickle.load(f)
     
+
     ds = dataloader.dataset
     print('minmax ', ds.min, ds.max)
     colors = ['blue', 'orange']
@@ -556,13 +557,14 @@ def plot_rescaled_crossroads(opt, foldername, dataloader, nsample, idx = 'test')
 
     M = samples[0].shape[0] #nb trajs per point
 
-    
+    print(f'N={N}, M={M}')
+
     fig = plt.figure()
     for i in range(N):
-        G = ds.min+(samples[i].cpu().numpy()+1)*(ds.max-ds.min)/2 
+        G = ds.min+(samples[i][:,0].cpu().numpy()+1)*(ds.max-ds.min)/2 
         R = ds.min+(target[i].cpu().numpy()+1)*(ds.max-ds.min)/2
         
-        G[:,:int(-opt.testmissingratio)] = R[:,:int(-opt.testmissingratio)].copy()
+        G[:, :int(-opt.testmissingratio)] = R[:,:int(-opt.testmissingratio)].copy()
             
         
         for dataind in range(M):
@@ -574,7 +576,7 @@ def plot_rescaled_crossroads(opt, foldername, dataloader, nsample, idx = 'test')
     plt.xlabel('x')
     #plt.legend()
     plt.tight_layout()
-    fig.savefig(foldername+f'CSDI_{opt.model_name}_crossroad_{idx}.png')
+    fig.savefig(foldername+f'CSDI_{opt.model_name}_{opt.model_name}_{idx}.png')
     plt.close()
 
 

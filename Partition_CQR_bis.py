@@ -6,7 +6,7 @@ import scipy.special
 import scipy.spatial
 from numpy.random import rand
 import matplotlib.pyplot as plt
-plt.rcParams.update({'font.size': 24})
+plt.rcParams.update({'font.size': 30})
 from torch.autograd import Variable
 from csdi_utils import *
 
@@ -26,7 +26,7 @@ class PartitionCQR():
 		- comb_flag = False: performs normal CQR over a single property 
 		- comb_flag = True: combine the prediction intervals of the CQR of two properties
 	'''
-	def __init__(self, Lc, Xc, cal_loader, num_cal_points, stl_property, partition_fnc, trained_generator, num_classes, opt, quantiles = [0.05, 0.95], plots_path=''):
+	def __init__(self, Lc, Xc, cal_loader, num_cal_points, stl_property, partition_fnc, trained_generator, num_classes, opt, quantiles = [0.05, 0.95], plots_path='', load = False, nsamples=1):
 		super(PartitionCQR, self).__init__()
 
 		self.Lc = Lc # [nb_state*nb_trajs,]
@@ -47,6 +47,8 @@ class PartitionCQR():
 		self.min = cal_loader.dataset.min
 		self.max = cal_loader.dataset.max
 		self.opt = opt
+		self.load = load
+		self.nsamples = nsamples
 
 	def get_pred_interval(self, inputs_loader,extra=''):
 		'''
@@ -54,8 +56,18 @@ class PartitionCQR():
 		'''
 
 		#[n_points, n_trajs, T, K]
-		gen_trajs,real_t = light_evaluate(self.trained_generator, inputs_loader, nsample=1,foldername=self.plots_path,  ds_id = extra)
+		
 
+		if self.load:
+			with open(self.plots_path+f'/trajs_{extra}_{self.nsamples}samples.pickle', 'rb') as file:
+				D = pickle.load(file)
+			gen_trajs,real_t = D['gen_trajs'],D['real_t']
+		else:
+			gen_trajs,real_t = light_evaluate(self.trained_generator, inputs_loader, nsample=self.nsamples,foldername=self.plots_path,  ds_id = extra)
+		
+			results = {'gen_trajs': gen_trajs, 'real_t': real_t}
+			with open(self.plots_path+f'/trajs_{extra}_{self.nsamples}samples.pickle', 'wb') as file:
+				pickle.dump(results, file)
 		#gen_trajs = generate_trajectories(self.trained_generator, inputs_loader, nsample=1)
 		
 
@@ -64,7 +76,7 @@ class PartitionCQR():
 			rescaled_realtrajs_i = self.min+(real_t[i].cpu().numpy()+1)*(self.max-self.min)/2 
 			
 			rescaled_trajs_i = self.min+(gen_trajs[i].cpu().numpy()+1)*(self.max-self.min)/2 
-			rescaled_trajs_i[:,:int(-self.opt.testmissingratio)] = rescaled_realtrajs_i[:,:int(-self.opt.testmissingratio)].copy()
+			rescaled_trajs_i[:,:int(-self.opt.testmissingratio)] = rescaled_realtrajs_i[0,:int(-self.opt.testmissingratio)]#.copy()
          
 			class_i = self.partition_fnc(rescaled_trajs_i) #[n_trajs,]
 			for g in range(self.num_classes):
@@ -91,15 +103,16 @@ class PartitionCQR():
 		ncm = []
 		
 		for g in range(self.num_classes):
-			
+			print('self.num_cal_points = ', self.num_cal_points)
 			ncm_g = []
 			for i in range(self.num_cal_points):
 
+				#print('self.listRc[g][i] = ',len(self.listRc[g][i]))
 				ncm_ig = []
 				if len(self.listRc[g][i]) > 0:
 					for j in range(len(self.listRc[g][i])):
 					
-						ncm_ig.append(max(self.calibr_quantiles[g][i,0]-self.listRc[g][i][j], self.listRc[g][i][j]-self.calibr_quantiles[g][i,-1])) # pred_interval[i,0] = q_lo(x), pred_interval[i,1] = q_hi(x)
+						ncm_ig.append(max(self.calibr_quantiles[g][i,0]-self.listRc[g][i][j], self.listRc[g][i][j]-self.calibr_quantiles[g][i,-1]).detach().cpu().numpy()) # pred_interval[i,0] = q_lo(x), pred_interval[i,1] = q_hi(x)
 				ncm_g.append(ncm_ig)
 			ncm_gg = sum(ncm_g,[])
 			print(f'g={g}, nb cal = {len(ncm_gg)}')
@@ -116,10 +129,12 @@ class PartitionCQR():
 		'''
 		self.m = self.q//self.num_cal_points
 
-		cal_rob_res = self.cal_robs.reshape((self.num_cal_points,self.m))
-		print('CAL ROBS: ', self.cal_robs.mean(), self.cal_robs.min(), self.cal_robs.max())
-		Lc_res = self.Lc.reshape((self.num_cal_points,self.m))
 
+
+		cal_rob_res = self.cal_robs.reshape((self.num_cal_points,self.m))
+		#print('CAL ROBS: ', self.cal_robs.mean(), self.cal_robs.min(), self.cal_robs.max())
+		Lc_res = self.Lc.reshape((self.num_cal_points,self.m))
+		print('Lc RESH = ', Lc_res.shape, Lc_res)
 		self.listRc = []  # num_classes, num_cal_points, var_num_trajs
 		c = 0
 		for g in range(self.num_classes):
@@ -145,15 +160,16 @@ class PartitionCQR():
 			if len(self.calibr_scores[g]) > 0:
 				Qg = (1-self.epsilon)*(1+1/len(self.calibr_scores[g]))
 				self.tau[g] = np.quantile(self.calibr_scores[g], Qg)
+				fig = plt.figure()
+				plt.scatter(np.arange(len(self.calibr_scores[g])), self.calibr_scores[g], color='g')
+				plt.scatter(self.epsilon*(1+1/len(self.calibr_scores[g]))*len(self.calibr_scores[g]), self.tau[g],color='r')
+				plt.title('calibr ncm')
+				plt.tight_layout()
+				plt.savefig(self.plots_path+f'/calibr_nonconf_scores_partition_g={g}_sol1.png')
+				plt.close()
 			else:
 				self.tau[g] = math.inf
-			fig = plt.figure()
-			plt.scatter(np.arange(len(self.calibr_scores[g])), self.calibr_scores[g], color='g')
-			plt.scatter(self.epsilon*(1+1/len(self.calibr_scores[g]))*len(self.calibr_scores[g]), self.tau[g],color='r')
-			plt.title('calibr ncm')
-			plt.tight_layout()
-			plt.savefig(self.plots_path+f'/calibr_nonconf_scores_partition_g={g}.png')
-			plt.close()
+			
 		print("self.tau: ", self.tau)
 
 
@@ -174,15 +190,105 @@ class PartitionCQR():
 
 
 		if pi_flag:
-			return cpis, pis.detach().numpy()
+			return cpis, pis.detach().cpu().numpy()
 		else:
 			return cpis
+
+	def get_global_coverage_efficiency(self, Ltest, Rtest, test_pred_intervals):
+		'''
+		Compute the empirical coverage and the efficiency of a prediction interval (test_pred_interval).
+		y_test are the observed target values
+		'''
+
+		
+		self.m = self.q//self.num_cal_points
+		n_test_points = len(Ltest)//self.m
+		test_rob_res = Rtest.reshape((n_test_points,self.m))
+		
+		Ltest_res = Ltest.reshape((n_test_points,self.m))
+
+		self.listRtest = []  # num_classes, num_test_points, var_num_trajs
+		
+		for g in range(self.num_classes):
+			Rt_g = []
+			for i in range(n_test_points):
+				Rt_ig = []
+				for j in range(self.m):
+					
+					if Ltest_res[i,j] == g:
+						Rt_ig.append(test_rob_res[i,j])
+				Rt_g.append(Rt_ig)
+			self.listRtest.append(Rt_g)
+
+		
+		cov = np.zeros(self.num_classes)
+		
+		for g in range(self.num_classes):
+			#eff[g] = np.mean(np.abs(test_pred_intervals[g][:,-1]-test_pred_intervals[g][:,0]))
+			den_gc = 0
+
+			for i in range(n_test_points):
+
+
+				den_gc += len(self.listRtest[g][i])
+				for j in range(len(self.listRtest[g][i])):
+					if self.listRtest[g][i][j] >= test_pred_intervals[g][i,0] and self.listRtest[g][i][j] <= test_pred_intervals[g][i,-1]:
+						cov[g] += 1
+
+			cov[g] = cov[g]/den_gc
+
+		eff = 0
+		for i in range(n_test_points):
+			intervals = []
+			for g in range(self.num_classes):
+				intervals.append([test_pred_intervals[g][i,0],test_pred_intervals[g][i,-1]])
+
+			eff += self.sum_intervals(intervals)/n_test_points
+
+
+		return cov.mean(), eff
+
+	def merge_intervals(self, intervals):
+	    # Ordina gli intervalli in base all'inizio
+	    intervals.sort(key=lambda x: x[0])
+	    merged = []
+
+	    for interval in intervals:
+	        # Se la lista merged è vuota o l'intervallo corrente non si sovrappone all'ultimo intervallo unito
+	        if not merged or merged[-1][1] < interval[0]:
+	            merged.append(interval)
+	        else:
+	            # Altrimenti, c'è sovrapposizione, quindi unisci gli intervalli
+	            merged[-1][1] = max(merged[-1][1], interval[1])
+
+	    return merged
+
+	def sum_intervals(self, intervals):
+	    # Unisce gli intervalli sovrapposti
+	    merged_intervals = self.merge_intervals(intervals)
+	    # Calcola la lunghezza totale degli intervalli uniti
+	    total_length = sum(end - start for start, end in merged_intervals)
+	    return total_length
+
+	def get_eqr(self, Rtest):
+
+		n = Rtest.shape[0]
+		eqr = 0
+		for i in range(n):
+
+			eqr += (np.quantile(Rtest[i],self.quantiles[-1])-np.quantile(Rtest[i],self.quantiles[0]))/n
+
+		return eqr
 
 	def get_coverage_efficiency(self, Ltest, Rtest, test_pred_intervals):
 		'''
 		Compute the empirical coverage and the efficiency of a prediction interval (test_pred_interval).
 		y_test are the observed target values
 		'''
+
+
+
+		self.m = self.q//self.num_cal_points
 		n_test_points = len(Ltest)//self.m
 		test_rob_res = Rtest.reshape((n_test_points,self.m))
 		
@@ -206,14 +312,23 @@ class PartitionCQR():
 		eff = np.zeros(self.num_classes)
 
 		for g in range(self.num_classes):
-			eff[g] = np.mean(np.abs(test_pred_intervals[g][:,-1]-test_pred_intervals[g][:,0]))
-			den_g = 0
+			#eff[g] = np.mean(np.abs(test_pred_intervals[g][:,-1]-test_pred_intervals[g][:,0]))
+			den_gc = 0
+			den_ge = 0
 			for i in range(n_test_points):
-				den_g += len(self.listRtest[g][i])
+
+				if len(self.listRtest[g][i]) > 0:
+
+					eff[g] += np.abs(test_pred_intervals[g][i,-1]-test_pred_intervals[g][i,0])
+					den_ge += 1
+
+				den_gc += len(self.listRtest[g][i])
 				for j in range(len(self.listRtest[g][i])):
 					if self.listRtest[g][i][j] >= test_pred_intervals[g][i,0] and self.listRtest[g][i][j] <= test_pred_intervals[g][i,-1]:
 						cov[g] += 1
-			cov[g] = cov[g]/den_g
+
+			cov[g] = cov[g]/den_gc
+			eff[g] = eff[g]/den_ge
 
 		return cov, eff
 
@@ -333,11 +448,11 @@ class PartitionCQR():
 		fig.savefig(plot_path+"/partition_"+extra_info+"_errorbar_merged.png")
 		plt.close()
 
-	def plot_multimodal_errorbars(self, y, qr_interval, cqr_interval, title_string, plot_path, extra_info = ''):
+	def plot_multimodal_errorbars(self, y, qr_interval, cqr_interval, title_string, plot_path, extra_info = '', model_name = ''):
 		'''
 		Create barplots
 		'''
-		n_points_to_plot = 25
+		n_points_to_plot = 10
 		
 		self.test_hist_size = y.shape[1]
 
@@ -366,43 +481,27 @@ class PartitionCQR():
 
 		n_quant = qr_interval[0].shape[1]
 
-		xline = np.arange(n_points_to_plot)
-		xline0 = np.arange(n_points_to_plot)+0.2
-		xline1 = np.arange(n_points_to_plot)+0.3
-		xline2 = np.arange(n_points_to_plot)+0.4
-
+		
+		xlines = [np.arange(n_points_to_plot) + 0.15*i for i in range(self.num_classes+1)]
 		fig = plt.figure(figsize=(20,4))
-		#plt.scatter(xline_rep_out, yq_out, c='peachpuff', s=6, alpha = 0.25)
-		#plt.scatter(xline_rep, yq, c='orange', s=6, alpha = 0.25,label='test')
 		plt.scatter(x_rep, y_resh.flatten(), c='orange', s=6, alpha = 0.25,label='test')
 		
-		plt.plot(xline, np.zeros(n_points_to_plot), '-.', color='k')
+		plt.plot(xlines[0], np.zeros(n_points_to_plot), '-.', color='k')
 		
+		colors = ['cyan','blue','darkviolet','violet']
+		for k in range(self.num_classes):
+			if cqr_interval[k][0,-1] < math.inf and cqr_interval[k][0,-1] == cqr_interval[k][0,-1]:
+				cqr_med = (cqr_interval[k][:n_points_to_plot,-1]+cqr_interval[k][:n_points_to_plot,0])/2
+				cqr_dminus = cqr_med-cqr_interval[k][:n_points_to_plot,0]
+				cqr_dplus = cqr_interval[k][:n_points_to_plot,-1]-cqr_med
+				plt.errorbar(x=xlines[k+1], y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = colors[k], fmt='none', capsize = 4,label=str(k+1))
 		
-		if cqr_interval[0][0,-1] < math.inf and cqr_interval[0][0,-1] == cqr_interval[0][0,-1]:
-			cqr_med = (cqr_interval[0][:n_points_to_plot,-1]+cqr_interval[0][:n_points_to_plot,0])/2
-			cqr_dminus = cqr_med-cqr_interval[0][:n_points_to_plot,0]
-			cqr_dplus = cqr_interval[0][:n_points_to_plot,-1]-cqr_med
-			plt.errorbar(x=xline0, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'blue', fmt='none', capsize = 4,label='0')
-		
-		if cqr_interval[1][0,-1] < math.inf and cqr_interval[1][0,-1] == cqr_interval[1][0,-1]:
-			cqr_med = (cqr_interval[1][:n_points_to_plot,-1]+cqr_interval[1][:n_points_to_plot,0])/2
-			cqr_dminus = cqr_med-cqr_interval[1][:n_points_to_plot,0]
-			cqr_dplus = cqr_interval[1][:n_points_to_plot,-1]-cqr_med
-			plt.errorbar(x=xline1, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'violet', fmt='none', capsize = 4,label='1')
-
-		if cqr_interval[2][0,-1] < math.inf and cqr_interval[2][0,-1] == cqr_interval[2][0,-1]:
-			cqr_med = (cqr_interval[2][:n_points_to_plot,-1]+cqr_interval[2][:n_points_to_plot,0])/2
-			cqr_dminus = cqr_med-cqr_interval[2][:n_points_to_plot,0]
-			cqr_dplus = cqr_interval[2][:n_points_to_plot,-1]-cqr_med
-			plt.errorbar(x=xline2, y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = 'darkviolet', fmt='none', capsize = 4,label='2')
-
 		plt.ylabel('robustness')
 		plt.title(title_string)
-		plt.legend()
+		plt.legend(fontsize=24)
 		plt.grid(True)
 		plt.tight_layout()
-		fig.savefig(plot_path+"/partition_"+extra_info+"_multimodal_errorbar.png")
+		fig.savefig(plot_path+f"/{model_name}_partition_"+extra_info+"_multimodal_errorbar_sol1_10.png")
 		plt.close()
 
 	

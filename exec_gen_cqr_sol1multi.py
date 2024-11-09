@@ -11,7 +11,7 @@ import torch
 import torch.autograd as autograd
 from torch.autograd import Variable
 
-from dataset import get_dataloader
+from dataset import *
 import json
 import yaml
 
@@ -22,7 +22,7 @@ from main_model import absCSDI
 from csdi_utils import *
 
 from NNClassifier import *
-from Partition_CQR_bis import *
+from Partition_CQR_multi import *
 
 cuda = True if torch.cuda.is_available() else False
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
@@ -38,10 +38,11 @@ parser.add_argument("--nfold", type=int, default=0, help="for 5fold test (valid 
 parser.add_argument("--model_name", type=str, default="crossroad")
 parser.add_argument("--unconditional", type=eval, default=False)#, action="store_true"
 parser.add_argument("--modelfolder", type=str, default="")
+parser.add_argument("--pedfolder", type=str, default="34")
 parser.add_argument("--nsample", type=int, default=1)
 parser.add_argument("--nepochs", type=int, default=1)
 parser.add_argument("--batch_size", type=int, default=64)
-parser.add_argument("--property_idx", type=int, default=1)
+parser.add_argument("--property_idx", type=int, default=3)
 parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--scaling_flag", type=eval, default=True)
 parser.add_argument("--load", default=False, type=eval)
@@ -127,6 +128,30 @@ train_loader, test_loader, cal_loader = get_dataloader(
 	scaling_flag=args.scaling_flag,
 )
 
+if args.property_idx == 3:
+	# load pedestrian datasets and dataloaders
+	
+	ped_test_loader, ped_cal_loader = get_test_calibr_dataloader(
+		model_name='pedestrian',
+		eval_length=23,
+		target_dim=2,
+		seed=args.seed,
+		nfold=args.nfold,
+		batch_size=300,
+		missing_ratio=config["model"]["test_missing_ratio"],
+		scaling_flag=args.scaling_flag,
+	)
+
+	pedfoldername =  f"./save/pedestrian/ID_{args.pedfolder}/"
+
+	ped_gen = absCSDI(config, args.device,target_dim=2).to(args.device)
+
+	print(f'Loading the pre-trained pedestrian model with id {args.pedfolder}..')
+	ped_gen.load_state_dict(torch.load(pedfoldername+ "model.pth"))
+
+
+
+
 
 model = absCSDI(config, args.device,target_dim=args.target_dim).to(args.device)
 
@@ -136,18 +161,26 @@ model.load_state_dict(torch.load(foldername+ "model.pth"))
 
 
 if args.model_name == 'crossroad':
-	stl_fnc = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+	if args.property_idx == 3:
+		stl_fnc_cal = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_cal_loader, prop_idx=3)
+		stl_fnc_test = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_test_loader, prop_idx=3)
+		
+	else:
+		stl_fnc_cal = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
+		stl_fnc_test = stl_fnc_cal
 elif args.model_name == 'navigator':
-	stl_fnc = lambda trajs: eval_navigator_property(trajs, prop_idx = args.property_idx)
+	stl_fnc_cal = lambda trajs: eval_navigator_property(trajs, prop_idx = args.property_idx)
+	stl_fnc_test = stl_fnc_cal
 else:  #signal
-	stl_fnc = lambda trajs: eval_signal_property(trajs)
+	stl_fnc_cal = lambda trajs: eval_signal_property(trajs)
+	stl_fnc_test = stl_fnc_cal
 
 
 Ncal = 600
 Ntest = 200
 Ntrajs = 300
 
-Rtest = stl_fnc(Xtest)
+Rtest = stl_fnc_test(Xtest)
 Rtest_res = Rtest.reshape((Ntest,Ntrajs)).detach().cpu().numpy()
 
 if True:
@@ -161,7 +194,7 @@ res_path = foldername+f'{args.model_name}_sol1_results_property={args.property_i
 if not args.calload:
 	
 
-	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_cal, stl_fnc_test), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
 
 	cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
 
@@ -182,17 +215,14 @@ else:
 	with open(res_path, 'rb') as file:
 		D = pickle.load(file)
 
-	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = stl_fnc, partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_cal, stl_fnc_test), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
 	
 	eqr = cqr.get_eqr(Rtest_res)
 	print('EQR = ', eqr)
 	pi_cov, pi_eff = cqr.get_global_coverage_efficiency(test_classes, Rtest, D['pis'])
 	print('PI Coverage = ', pi_cov)
 	print('PI Efficiency = ', pi_eff)
-	c_cov, c_eff = cqr.get_coverage_efficiency(test_classes, Rtest, D['pis'])
-	cc_cov, cc_eff = cqr.get_coverage_efficiency(test_classes, Rtest, D['cpis'])
-	print('class spec pi cov = ', c_cov, cc_cov)
-	print('class spec pi eff = ', c_eff, cc_eff)
+
 	cpi_cov, cpi_eff = cqr.get_global_coverage_efficiency(test_classes, Rtest, D['cpis'])
 	print('CPI Coverage = ', cpi_cov)
 	print('CPI Efficiency = ', cpi_eff)

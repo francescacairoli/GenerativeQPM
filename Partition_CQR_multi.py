@@ -42,8 +42,10 @@ class PartitionCQR():
 		self.col_list = ['yellow', 'orange', 'red', 'orange', 'yellow']
 		self.plots_path = plots_path
 		self.num_classes = num_classes
-		self.stl_property = stl_property
-		self.cal_robs = stl_property(self.Xc) #[nb_state*nb_trajs,]
+		self.stl_property_cal = stl_property[0]
+		self.stl_property_test = stl_property[1]
+		self.cal_robs = self.stl_property_cal(self.Xc)
+		
 		self.num_cal_points = num_cal_points
 		self.min = cal_loader.dataset.min
 		self.max = cal_loader.dataset.max
@@ -85,7 +87,10 @@ class PartitionCQR():
 				KT = rescaled_trajs_i[class_i==g]
 				
 				if len(KT) > 0:
-					robs_ig = self.stl_property(KT)
+					if extra=='cal':
+						robs_ig = self.stl_property_cal(KT)
+					else:
+						robs_ig = self.stl_property_test(KT)
 					QQ[g,i,0] = torch.quantile(robs_ig, q = self.quantiles[0]) # qlo_ig
 					QQ[g,i,1] = torch.quantile(robs_ig, q = self.quantiles[-1]) # qhi_ig
 				else:

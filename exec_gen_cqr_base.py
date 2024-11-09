@@ -78,42 +78,18 @@ foldername = f"./save/{args.model_name}/ID_{args.modelfolder}/"
 Xtrain, train_classes = load_train_data(args.model_name)
 Xcal, cal_classes = load_calibr_data(args.model_name)
 Xtest, test_classes = load_test_data(args.model_name)
-#Xtest_fixed, _ = load_test_fixed_data(args.model_name)
 
-#cal_classes = cal_classes.detach().cpu().numpy()
-#test_classes = test_classes.detach().cpu().numpy()
+
+train_classes = np.zeros(train_classes.shape)
+cal_classes = np.zeros(cal_classes.shape)
+test_classes = np.zeros(test_classes.shape)
+
 print('data loaded !')
 
 #CQR with GENERATIVE MODEL
-if args.classifier:
-	if args.model_name == 'crossroad' or args.model_name == 'signal':
-		Nclasses = 3
-	else:
-		Nclasses = 4
-
-	classif_id = 'CNN'
-	class_path = f'./save/{args.model_name}/trajectory_classifier_model_20epochs.pth'
-	classif = TrajectoryClassifier1D(Nclasses)
-	classif.load_state_dict(torch.load(class_path))
-	classif.eval()
-
-
-	def partition_fnc(x):
-		pred_lkh = classif(torch.tensor(x))
-		y = torch.argmax(pred_lkh, dim=1)
-
-		return y
-else:
-	if args.model_name == 'crossroad':	
-		partition_fnc = lambda x: crossroad_partition(x)
-		Nclasses = 3
-	elif args.model_name == 'navigator': # Navigator
-		partition_fnc = lambda x: navigator_partition(x)
-		Nclasses = 4
-	else: # signal
-		partition_fnc = lambda x: signal_partition(x)
-		Nclasses = 3
-
+Nclasses = 1
+partition_fnc = lambda x: np.zeros(x.shape[0])
+		
 
 # load datasets and dataloaders
 train_loader, test_loader, cal_loader = get_dataloader(
@@ -150,14 +126,8 @@ Ntrajs = 300
 Rtest = stl_fnc(Xtest)
 Rtest_res = Rtest.reshape((Ntest,Ntrajs)).detach().cpu().numpy()
 
-if True:
-	plot_partition((Xtrain,Xcal,Xtest), partition_fnc, foldername, args.model_name, args.property_idx, args.nb_trajs_to_plot, args.gridmap)
-	plot_trajs_with_robustness(Xtest, Rtest, f'./save/{args.model_name}', args.model_name, args.property_idx, args.nb_trajs_to_plot, args.gridmap)
-	plot_robustness_histogram(Xtest, Rtest_res, f'./save/{args.model_name}', args.model_name, args.property_idx)
 
-	print('Plotting done!')
-
-res_path = foldername+f'{args.model_name}_sol1_results_property={args.property_idx}_class={args.classifier}.pickle'
+res_path = foldername+f'{args.model_name}_base_results_property={args.property_idx}_class={args.classifier}.pickle'
 if not args.calload:
 	
 
@@ -174,7 +144,7 @@ if not args.calload:
 	with open(res_path, 'wb') as file:
 		pickle.dump(results, file)
 
-	cqr.plot_multimodal_errorbars(Rtest_res, pis, cpis, 'multimodal cqr', foldername, extra_info=str(args.property_idx)+f'_class={args.classifier}', model_name=args.model_name)
+	cqr.plot_multimodal_errorbars(Rtest_res, pis, cpis, 'unimodal cqr - baseline', foldername, extra_info=str(args.property_idx)+f'_class={args.classifier}_base', model_name=args.model_name)
 
 
 else:
@@ -197,4 +167,4 @@ else:
 	print('CPI Coverage = ', cpi_cov)
 	print('CPI Efficiency = ', cpi_eff)
 	
-	#cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)
+	cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'unimodal cqr - baseline', foldername, extra_info=str(args.property_idx)+f'_class={args.classifier}_base', model_name=args.model_name)

@@ -4,46 +4,58 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 
 flag ='test'
-fn = 'data/'+flag+'_crossroad_trajs.mat'
+modelname = 'pedestrian'
+#fn = f'data/{modelname}/{modelname}_'+flag+'_trajs_big.mat'
+fn = f'data/{modelname}/{modelname}_'+flag+'_trajs.mat'
 
 data = sio.loadmat(fn)
 
-m = 31 # fix number of steps 
 
-full_trajs = data['trajs'][0]
+full_trajs = data['list_trajs'][0]
 
-print(data['trajs'][0][0].shape)
 n = full_trajs.shape[0]
 d = full_trajs[0].shape[1]
 
-X = np.empty((n,m,d))
+lengths = np.empty(n)
+for j in range(n):
+	lengths[j] = full_trajs[j].shape[0]
+	
+max_len = 23#int(np.max(lengths))
 
-fig = plt.figure()
+print('max len = ', max_len)
+
+print('n = ', n)
+print('d = ', d)
+
+X = np.empty((n,max_len,d))
+
+if d==2:
+	fig = plt.figure()
 for i in range(n):
 
 	D = full_trajs[i]
 	h = D.shape[0]
-	if  h >= m:
-		X[i] = D[:m]
-	else:
-		c = 0
-		for j in range(m-h):
-			Dcopy = D.copy()
-			X[i,c] = D[j]
-			X[i,c+1] = (D[j]+D[j+1])/2
-			c = c+2
-		X[i,c:] = D[j+1:]	
 
-	
-	plt.plot(X[i,:,0,], X[i,:,1], c='b')
+	if h > max_len:
+		h = max_len
+	X[i,:h] = D[:h].copy()
 
-fig.savefig('data/'+flag+'_cropped_trajs.png')
-plt.close()
+		
+	for j in range(h, max_len):
+		Dcopy = D.copy()
+		X[i,j] = D[-1]
+		
+		if d==2:		
+			plt.plot(X[i,:,0], X[i,:,1], c='b')
 
-labels = np.zeros(n)
-labels[n//3:2*n//3] = 1
-labels[2*n//3:] = 2
-path = 'data/crossroad_data_'+flag+'.pickle'
-data_dict = {'trajs': X, 'labels': labels}
+			fig.savefig('./data/'+modelname+'/plots/'+flag+f'_repeated_trajs_{modelname}_map.png')
+			plt.close()
+
+
+print(X)
+
+path = 'data/'+modelname+'/'+modelname+'_data_'+flag+'.pickle'
+data_dict = {'trajs': X}
 with open(path, "wb") as f:
 	pickle.dump(data_dict, f)
+	

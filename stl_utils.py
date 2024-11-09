@@ -3,8 +3,9 @@ import torch.nn.functional as F
 import time
 import matplotlib.pyplot as plt
 import stl
-
 import numpy as np
+
+
 print("CUDA availabe = " + str(torch.cuda.is_available()))
 device = torch.device("cuda") 
 
@@ -23,8 +24,59 @@ def eval_signal_property(signal):
 	satisf = formula.quantitative(torch.tensor(signal))
 	return satisf
 
+def eval_crossroad_multiagent_property(signal, ped_gen, input_loader, prop_idx=3):
+
+	from csdi_utils import gen_batch_trajs
+	#gen_trajs,real_t = light_evaluate(ped_gen, input_loader, nsample=1,foldername='',  ds_id = 'test', save = False)
+	#rescaled_realtrajs = input_loader.dataset.min+(real_t[0].cpu().numpy()+1)*(input_loader.dataset.max-input_loader.dataset.min)/2 
+	#pedestrian = input_loader.dataset.min+(gen_trajs[0].cpu().numpy()+1)*(input_loader.dataset.max-input_loader.dataset.min)/2 
+	#pedestrian[:,:1] = rescaled_realtrajs_i[0,:1]
+	signal = signal.transpose(0,2,1)
+	n_timesteps = signal.shape[2]
+	
+	
+	pedestrian = gen_batch_trajs(ped_gen, input_loader)
+	
+	pedestrian = pedestrian.permute(0,2,1)[:,:,:n_timesteps]
+
+	print('signal = ', signal.shape)
+	print('pedestrian = ', pedestrian.shape)
+	x_barrier = 37
+
+	safe_dist = 5
+	ped_dist = 1
+
+	signal_t = torch.tensor(signal)
+
+	moving_car = np.vstack((np.linspace(35,50,n_timesteps)[::-1],33*np.ones(n_timesteps)))
+	dist_car = np.expand_dims([np.linalg.norm(signal[i]-moving_car,2,axis=0) for i in range(signal.shape[0])],axis=1)
+	dist_car_t = torch.tensor(dist_car)
+
+	
+	dist_ped_t = torch.linalg.norm(signal_t-pedestrian[:signal_t.shape[0]],2,axis=1).unsqueeze(1)
+	
+	#dist_ped_t = torch.tensor(dist_ped)
+
+	# avoid right turns
+	atom_rt = stl.Atom(var_index=0, threshold=x_barrier, lte=True) # lte = True is <=
+	
+	atom_car = stl.Atom(var_index=1, threshold=safe_dist, lte=False) # lte = True is <=
+	atom_ped = stl.Atom(var_index=2, threshold=ped_dist, lte=False) # lte = True is <=
+	
+	obj_form = stl.And(atom_car, atom_ped)
+	multi_form = stl.And(atom_rt, obj_form)
+
+	glob3 = stl.Globally(multi_form, unbound=False, time_bound=n_timesteps-1)
+
+	concat_signal_t = torch.cat((signal_t, dist_car_t, dist_ped_t), dim=1)
+
+	satisf = glob3.quantitative(concat_signal_t)
+		
+
+	return satisf
 
 def eval_crossroad_property(signal, prop_idx = 1):
+
 
 	signal = signal.transpose(0,2,1)
 	n_timesteps = signal.shape[2]
@@ -50,7 +102,7 @@ def eval_crossroad_property(signal, prop_idx = 1):
 		glob2 = stl.Globally(atom2, unbound=False, time_bound=n_timesteps-1)
 	
 		satisf = glob2.quantitative(dist_signal_t)
-
+	
 	return satisf
 
 

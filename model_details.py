@@ -37,6 +37,11 @@ def get_model_details(opt):
 		opt.target_dim = 2
 		opt.eval_length = 22
 		opt.gridmap = None
+	elif opt.model_name == "pedestrian":
+		opt.species_labels = ["x", "y"]
+		opt.target_dim = 2
+		opt.eval_length = 23
+		opt.gridmap = None
 	else:
 		opt.species_labels = []
 		opt.target_dim = 0

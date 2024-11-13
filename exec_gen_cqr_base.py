@@ -46,7 +46,7 @@ parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--scaling_flag", type=eval, default=True)
 parser.add_argument("--load", default=False, type=eval)
 parser.add_argument("--calload", default=False, type=eval)
-parser.add_argument("--classifier", default=True, type=eval, help=" True = NN classif, False = kmeans") 
+parser.add_argument("--classifier", default=False, type=eval, help=" True = NN classif, False = kmeans") 
 parser.add_argument("--epsilon", type=float, default=0.1)
 parser.add_argument("--nb_trajs_to_plot", type=int, default=100)
 

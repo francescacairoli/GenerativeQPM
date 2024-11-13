@@ -15,10 +15,37 @@ parser.add_argument("--load", default=False, type=eval)
 args = parser.parse_args()
 print(args)
 
+class WeightedPenaltyCrossEntropyLoss(nn.Module):
+    def __init__(self, weights, penalty_weight=1.5):
+        """
+        :param weights: Tensor of class weights for unbalanced dataset (e.g., Tensor([2, 1, 1, 2]) for classes 0 and 3)
+        :param penalty_weight: Weight to increase penalty for incorrect predictions on classes 0 and 3
+        """
+        super(WeightedPenaltyCrossEntropyLoss, self).__init__()
+        self.weights = weights
+        self.penalty_weight = penalty_weight
+        self.criterion = nn.CrossEntropyLoss(weight=weights)
+
+    def forward(self, outputs, targets):
+        # Compute base weighted cross-entropy loss
+        base_loss = self.criterion(outputs, targets)
+
+        # Identify misclassified instances for classes 0 and 3
+        _, predicted = torch.max(outputs, dim=1)
+        misclassified_0 = (predicted != targets) & (targets == 0)
+        misclassified_3 = (predicted != targets) & (targets == 3)
+
+        # Apply penalty for these specific mistakes
+        penalty = (misclassified_0.sum() + misclassified_3.sum()) * self.penalty_weight
+
+        # Total loss
+        total_loss = base_loss + penalty / targets.size(0)  # Normalize penalty by batch size
+        return total_loss
 
 # Generazione dei dati di esempio
 X_train, y_train = load_train_data(args.model_name)
 X_val, y_val = load_test_data(args.model_name)
+
 
 # Creazione dei DataLoader per il training e la validazione
 train_dataset = TensorDataset(torch.tensor(X_train), torch.tensor(y_train))
@@ -28,13 +55,19 @@ train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tru
 val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
 if args.model_name == 'navigator':
+    print('0:', y_train[y_train==0])
+    print('3:', y_train[y_train==3])
     nclasses = 4
 else:
     nclasses = 3
 print('---nclasses = ', nclasses)
 # Inizializzazione del modello, ottimizzatore e funzione di perdita
 model = TrajectoryClassifier1D(nclasses)
-criterion = nn.CrossEntropyLoss()
+if args.model_name == 'navigator':
+    criterion = WeightedPenaltyCrossEntropyLoss(weights = torch.tensor([2.0, 1.0, 1.0, 2.0]))
+else:
+    criterion = nn.CrossEntropyLoss()
+
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 # Funzione per il ciclo di allenamento

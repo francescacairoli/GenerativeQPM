@@ -197,4 +197,4 @@ else:
 	print('CPI Coverage = ', cpi_cov)
 	print('CPI Efficiency = ', cpi_eff)
 	
-	#cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)
+	cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)

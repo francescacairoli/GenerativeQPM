@@ -37,8 +37,8 @@ parser.add_argument("--testmissingratio", type=float, default=-1.0)
 parser.add_argument("--nfold", type=int, default=0, help="for 5fold test (valid value:[0-4])")
 parser.add_argument("--model_name", type=str, default="crossroad")
 parser.add_argument("--unconditional", type=eval, default=False)#, action="store_true"
-parser.add_argument("--modelfolder", type=str, default="")
-parser.add_argument("--pedfolder", type=str, default="34")
+parser.add_argument("--modelfolder", type=str, default="467")
+parser.add_argument("--pedfolder", type=str, default="416")
 parser.add_argument("--nsample", type=int, default=1)
 parser.add_argument("--nepochs", type=int, default=1)
 parser.add_argument("--batch_size", type=int, default=64)
@@ -47,7 +47,7 @@ parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--scaling_flag", type=eval, default=True)
 parser.add_argument("--load", default=False, type=eval)
 parser.add_argument("--calload", default=False, type=eval)
-parser.add_argument("--classifier", default=True, type=eval, help=" True = NN classif, False = kmeans") 
+parser.add_argument("--classifier", default=False, type=eval, help=" True = NN classif, False = kmeans") 
 parser.add_argument("--epsilon", type=float, default=0.1)
 parser.add_argument("--nb_trajs_to_plot", type=int, default=100)
 
@@ -131,7 +131,7 @@ train_loader, test_loader, cal_loader = get_dataloader(
 if args.property_idx == 3:
 	# load pedestrian datasets and dataloaders
 	
-	ped_test_loader, ped_cal_loader = get_test_calibr_dataloader(
+	ped_test_loader, ped_cal_loader, ped_testbatch_loader, ped_calbatch_loader = get_test_calibr_dataloader(
 		model_name='pedestrian',
 		eval_length=23,
 		target_dim=2,
@@ -140,6 +140,7 @@ if args.property_idx == 3:
 		batch_size=300,
 		missing_ratio=config["model"]["test_missing_ratio"],
 		scaling_flag=args.scaling_flag,
+		nsample = args.nsample
 	)
 
 	pedfoldername =  f"./save/pedestrian/ID_{args.pedfolder}/"
@@ -162,8 +163,10 @@ model.load_state_dict(torch.load(foldername+ "model.pth"))
 
 if args.model_name == 'crossroad':
 	if args.property_idx == 3:
-		stl_fnc_cal = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_cal_loader, prop_idx=3)
-		stl_fnc_test = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_test_loader, prop_idx=3)
+		stl_fnc_cal = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_cal_loader, prop_idx=3, nsample=args.nsample, extra='full')
+		stl_fnc_test = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_test_loader, prop_idx=3, nsample=args.nsample, extra='full')
+		stl_fnc_calbatch = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_calbatch_loader, prop_idx=3, nsample=1, extra='batch')
+		stl_fnc_testbatch = lambda trajs: eval_crossroad_multiagent_property(trajs, ped_gen, ped_testbatch_loader, prop_idx=3, nsample=1, extra='batch')
 		
 	else:
 		stl_fnc_cal = lambda trajs: eval_crossroad_property(trajs, prop_idx = args.property_idx)
@@ -181,6 +184,7 @@ Ntest = 200
 Ntrajs = 300
 
 Rtest = stl_fnc_test(Xtest)
+Rcal = stl_fnc_cal(Xcal)
 Rtest_res = Rtest.reshape((Ntest,Ntrajs)).detach().cpu().numpy()
 
 if True:
@@ -194,7 +198,7 @@ res_path = foldername+f'{args.model_name}_sol1_results_property={args.property_i
 if not args.calload:
 	
 
-	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_cal, stl_fnc_test), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	cqr = PartitionCQR(cal_classes, Xcal, Rcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_calbatch, stl_fnc_testbatch), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
 
 	cpis, pis = cqr.get_cpi(test_loader, pi_flag = True)
 
@@ -215,7 +219,7 @@ else:
 	with open(res_path, 'rb') as file:
 		D = pickle.load(file)
 
-	cqr = PartitionCQR(cal_classes, Xcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_cal, stl_fnc_test), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
+	cqr = PartitionCQR(cal_classes, Xcal, Rcal, cal_loader, num_cal_points=Ncal, stl_property = (stl_fnc_calbatch, stl_fnc_testbatch), partition_fnc=partition_fnc, trained_generator=model, num_classes=Nclasses, opt = args, quantiles = [args.epsilon/2, 1-args.epsilon/2], plots_path=foldername, load=args.load, nsamples=args.nsample)
 	
 	eqr = cqr.get_eqr(Rtest_res)
 	print('EQR = ', eqr)
@@ -227,4 +231,4 @@ else:
 	print('CPI Coverage = ', cpi_cov)
 	print('CPI Efficiency = ', cpi_eff)
 	
-	#cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)
+	cqr.plot_multimodal_errorbars(D['Rtest_res'], D['pis'], D['cpis'], 'multimodal cqr', foldername, extra_info=str(args.property_idx), model_name=args.model_name)

@@ -460,7 +460,9 @@ class PartitionCQR():
 		n_test_points = y.shape[0]
 		
 
-		y_resh = y[:n_points_to_plot]
+		indexes = np.random.randint(0,y.shape[0], size = n_points_to_plot)
+		
+		y_resh = y[indexes[:n_points_to_plot]]
 		yq = []
 		yq_out = []
 		x_rep = []
@@ -492,9 +494,9 @@ class PartitionCQR():
 		colors = ['cyan','blue','darkviolet','violet']
 		for k in range(self.num_classes):
 			if cqr_interval[k][0,-1] < math.inf and cqr_interval[k][0,-1] == cqr_interval[k][0,-1]:
-				cqr_med = (cqr_interval[k][:n_points_to_plot,-1]+cqr_interval[k][:n_points_to_plot,0])/2
-				cqr_dminus = cqr_med-cqr_interval[k][:n_points_to_plot,0]
-				cqr_dplus = cqr_interval[k][:n_points_to_plot,-1]-cqr_med
+				cqr_med = (cqr_interval[k][indexes[:n_points_to_plot],-1]+cqr_interval[k][indexes[:n_points_to_plot],0])/2
+				cqr_dminus = cqr_med-cqr_interval[k][indexes[:n_points_to_plot],0]
+				cqr_dplus = cqr_interval[k][indexes[:n_points_to_plot],-1]-cqr_med
 				plt.errorbar(x=xlines[k+1], y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = colors[k], fmt='none', capsize = 4,label=str(k+1))
 		
 		plt.ylabel('robustness')

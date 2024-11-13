@@ -86,7 +86,7 @@ train_loader, valid_loader, test_loader = get_dataloader(
     scaling_flag=args.scaling_flag
 )
 
-
+print('-----', train_loader.dataset.observed_values.shape)
 model = absCSDI(config, args.device,target_dim=args.target_dim).to(args.device)
 
 if not args.load:

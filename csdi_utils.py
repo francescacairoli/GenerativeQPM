@@ -233,43 +233,59 @@ def evaluate(model, test_loader, nsample=1, scaler=1, mean_scaler=0, foldername=
                 print("MAE:", mae_total / evalpoints_total)
                 print("CRPS:", CRPS)
 
-def gen_batch_trajs(model, test_loader):
+def gen_batch_trajs(model, test_loader, nsample, extra):
     
-    nsample=1
+
+
     with torch.no_grad():
         model.eval()
-        gen_samples = []
         mini = test_loader.dataset.min
         maxi = test_loader.dataset.max
-        with tqdm(test_loader, mininterval=5.0, maxinterval=150.0) as it:
+        if extra == 'full':
+            gen_samples = []
             
-            for batch_no, test_batch in enumerate(it, start=1):
-                output = model.evaluate(test_batch, nsample)
-                samples, c_target, eval_points, observed_points, observed_time = output
-                samples = samples.permute(0, 1, 3, 2)
-                c_target = c_target.permute(0, 2, 1)  # (B,L,K)
+            with tqdm(test_loader, mininterval=5.0, maxinterval=150.0) as it:
+                
+                for batch_no, test_batch in enumerate(it, start=1):
+                    output = model.evaluate(test_batch, nsample)
+                    samples, c_target, eval_points, observed_points, observed_time = output
+                    samples = samples.permute(0, 1, 3, 2)
+                    c_target = c_target.permute(0, 2, 1)  # (B,L,K)
 
-                #print('.....',samples.shape, c_target.shape)
-                realtrajs = mini+(c_target+1)*(maxi-mini)/2 
-                gentrajs = mini+(samples[:,0]+1)*(maxi-mini)/2 
-                gentrajs[:,:1] = realtrajs[0,:1]
-                gen_samples.append(gentrajs)
+                    #print('.....',samples.shape, c_target.shape)
+                    realtrajs = mini+(c_target+1)*(maxi-mini)/2 
+                    gentrajs = mini+(samples[:,0]+1)*(maxi-mini)/2 
+                    gentrajs[:,:1] = realtrajs[0,:1]
+                    gen_samples.append(gentrajs)
+                N = len(gen_samples) # nb of points
+                K = gen_samples[0].shape[-1] #feature
+                L = gen_samples[0].shape[-2] #time length
+                M = gen_samples[0].shape[0] #ntrajs
 
-        N = len(gen_samples) # nb of points
-        K = gen_samples[0].shape[-1] #feature
-        L = gen_samples[0].shape[-2] #time length
-        M = gen_samples[0].shape[0] #ntrajs
+                
+                gen_samples_res = torch.zeros((N*M,L,K))
 
-        
-        gen_samples_res = torch.zeros((N*M,L,K))
+                c=0
+                for i in range(N):
+                    
+                    gen_samples_res[c:c+M] = gen_samples[i]
+                    c += M
+        else:
 
-        c=0
-        for i in range(N):
-            
-            gen_samples_res[c:c+M] = gen_samples[i]
-            c += M
+            test_batch = next(iter(test_loader))
+            output = model.evaluate(test_batch, nsample)
+            samples, c_target, eval_points, observed_points, observed_time = output
+            samples = samples.permute(0, 1, 3, 2)
+            c_target = c_target.permute(0, 2, 1)  # (B,L,K)
+            realtrajs = mini+(c_target+1)*(maxi-mini)/2 
+            gen_samples_res = mini+(samples[:,0]+1)*(maxi-mini)/2 
+            gen_samples_res[:,:1] = realtrajs[0,:1]
 
-        print(' gen_samples_res.shape =', gen_samples_res.shape)
+
+
+
+
+        print(' gen_samples_res.shape =', extra,  gen_samples_res.shape)
 
     return gen_samples_res
 

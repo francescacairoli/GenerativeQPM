@@ -27,7 +27,7 @@ class PartitionCQR():
 		- comb_flag = False: performs normal CQR over a single property 
 		- comb_flag = True: combine the prediction intervals of the CQR of two properties
 	'''
-	def __init__(self, Lc, Xc, cal_loader, num_cal_points, stl_property, partition_fnc, trained_generator, num_classes, opt, quantiles = [0.05, 0.95], plots_path='', load = False, nsamples=1):
+	def __init__(self, Lc, Xc, Rc, cal_loader, num_cal_points, stl_property, partition_fnc, trained_generator, num_classes, opt, quantiles = [0.05, 0.95], plots_path='', load = False, nsamples=1):
 		super(PartitionCQR, self).__init__()
 
 		self.Lc = Lc # [nb_state*nb_trajs,]
@@ -44,7 +44,7 @@ class PartitionCQR():
 		self.num_classes = num_classes
 		self.stl_property_cal = stl_property[0]
 		self.stl_property_test = stl_property[1]
-		self.cal_robs = self.stl_property_cal(self.Xc)
+		self.cal_robs = Rc#self.stl_property_cal(self.Xc)
 		
 		self.num_cal_points = num_cal_points
 		self.min = cal_loader.dataset.min
@@ -53,7 +53,7 @@ class PartitionCQR():
 		self.load = load
 		self.nsamples = nsamples
 
-	def get_pred_interval(self, inputs_loader,extra=''):
+	def get_pred_interval(self, inputs_loader,extra):
 		'''
 		Apply the trained QR to inputs and returns the QR prediction interval
 		'''
@@ -87,7 +87,7 @@ class PartitionCQR():
 				KT = rescaled_trajs_i[class_i==g]
 				
 				if len(KT) > 0:
-					if extra=='cal':
+					if extra == 'cal':
 						robs_ig = self.stl_property_cal(KT)
 					else:
 						robs_ig = self.stl_property_test(KT)
@@ -463,9 +463,11 @@ class PartitionCQR():
 		self.test_hist_size = y.shape[1]
 
 		n_test_points = y.shape[0]
+
+		indexes = np.random.randint(0,y.shape[0], size = n_points_to_plot)
 		
 
-		y_resh = y[:n_points_to_plot]
+		y_resh = y[indexes[:n_points_to_plot]]
 		yq = []
 		yq_out = []
 		x_rep = []
@@ -497,9 +499,9 @@ class PartitionCQR():
 		colors = ['cyan','blue','darkviolet','violet']
 		for k in range(self.num_classes):
 			if cqr_interval[k][0,-1] < math.inf and cqr_interval[k][0,-1] == cqr_interval[k][0,-1]:
-				cqr_med = (cqr_interval[k][:n_points_to_plot,-1]+cqr_interval[k][:n_points_to_plot,0])/2
-				cqr_dminus = cqr_med-cqr_interval[k][:n_points_to_plot,0]
-				cqr_dplus = cqr_interval[k][:n_points_to_plot,-1]-cqr_med
+				cqr_med = (cqr_interval[k][indexes[:n_points_to_plot],-1]+cqr_interval[k][indexes[:n_points_to_plot],0])/2
+				cqr_dminus = cqr_med-cqr_interval[k][indexes[:n_points_to_plot],0]
+				cqr_dplus = cqr_interval[k][indexes[:n_points_to_plot],-1]-cqr_med
 				plt.errorbar(x=xlines[k+1], y=cqr_med, yerr=[cqr_dminus,cqr_dplus],  color = colors[k], fmt='none', capsize = 4,label=str(k+1))
 		
 		plt.ylabel('robustness')

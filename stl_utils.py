@@ -4,6 +4,7 @@ import time
 import matplotlib.pyplot as plt
 import stl
 import numpy as np
+import math
 
 
 print("CUDA availabe = " + str(torch.cuda.is_available()))
@@ -24,33 +25,43 @@ def eval_signal_property(signal):
 	satisf = formula.quantitative(torch.tensor(signal))
 	return satisf
 
-def eval_crossroad_multiagent_property(signal, ped_gen, input_loader, prop_idx=3):
+def eval_crossroad_multiagent_property(signal, ped_gen, input_loader, prop_idx, nsample, extra):
 
 	from csdi_utils import gen_batch_trajs
-	#gen_trajs,real_t = light_evaluate(ped_gen, input_loader, nsample=1,foldername='',  ds_id = 'test', save = False)
-	#rescaled_realtrajs = input_loader.dataset.min+(real_t[0].cpu().numpy()+1)*(input_loader.dataset.max-input_loader.dataset.min)/2 
-	#pedestrian = input_loader.dataset.min+(gen_trajs[0].cpu().numpy()+1)*(input_loader.dataset.max-input_loader.dataset.min)/2 
-	#pedestrian[:,:1] = rescaled_realtrajs_i[0,:1]
+	
 	signal = signal.transpose(0,2,1)
 	n_timesteps = signal.shape[2]
 	
 	
-	pedestrian = gen_batch_trajs(ped_gen, input_loader)
+	pedestrian = gen_batch_trajs(ped_gen, input_loader, nsample, extra).to(device)
 	
 	pedestrian = pedestrian.permute(0,2,1)[:,:,:n_timesteps]
 
+	'''
+	ped_np = pedestrian.detach().cpu().numpy()
+	for j in range(signal.shape[0]):
+		plt.plot(ped_np[j,0], ped_np[j,1], 'r')
+		plt.plot(signal[j,0], signal[j,1], 'b')
+		plt.plot(np.linspace(35,50,n_timesteps)[::-1],33*np.ones(n_timesteps), 'g')
+	plt.title(extra)
+	idx = np.random.randint(0,1000,size=1)
+	if idx < 100:
+		plt.savefig('save/pedestrian/vis/crossroad_multiagent_'+extra+f'_{idx}.png')
+	plt.close()
+	'''
+	print('----' , extra)
 	print('signal = ', signal.shape)
 	print('pedestrian = ', pedestrian.shape)
 	x_barrier = 37
 
 	safe_dist = 5
-	ped_dist = 1
+	ped_dist = 5
 
-	signal_t = torch.tensor(signal)
+	signal_t = torch.tensor(signal).to(device)
 
 	moving_car = np.vstack((np.linspace(35,50,n_timesteps)[::-1],33*np.ones(n_timesteps)))
 	dist_car = np.expand_dims([np.linalg.norm(signal[i]-moving_car,2,axis=0) for i in range(signal.shape[0])],axis=1)
-	dist_car_t = torch.tensor(dist_car)
+	dist_car_t = torch.tensor(dist_car).to(device)
 
 	
 	dist_ped_t = torch.linalg.norm(signal_t-pedestrian[:signal_t.shape[0]],2,axis=1).unsqueeze(1)
@@ -60,13 +71,14 @@ def eval_crossroad_multiagent_property(signal, ped_gen, input_loader, prop_idx=3
 	# avoid right turns
 	atom_rt = stl.Atom(var_index=0, threshold=x_barrier, lte=True) # lte = True is <=
 	
-	atom_car = stl.Atom(var_index=1, threshold=safe_dist, lte=False) # lte = True is <=
-	atom_ped = stl.Atom(var_index=2, threshold=ped_dist, lte=False) # lte = True is <=
+	atom_car = stl.Atom(var_index=2, threshold=safe_dist, lte=False) # lte = True is <=
+	atom_ped = stl.Atom(var_index=3, threshold=ped_dist, lte=False) # lte = True is <=
 	
 	obj_form = stl.And(atom_car, atom_ped)
 	multi_form = stl.And(atom_rt, obj_form)
 
 	glob3 = stl.Globally(multi_form, unbound=False, time_bound=n_timesteps-1)
+	#glob3 = stl.Globally(atom_ped, unbound=False, time_bound=n_timesteps-1)
 
 	concat_signal_t = torch.cat((signal_t, dist_car_t, dist_ped_t), dim=1)
 

@@ -22,12 +22,12 @@ class Dataset(Dataset):
 		self.missing_ratio = missing_ratio
 		use_index_list = None
 		if scaling_flag:
-			newpath = (f"data/{model_name}_norm_"+idx+f"_missing{missing_ratio}_gtmask{extra_info}.pickle")
+			newpath = (f"data/{self.model_name}/{self.model_name}_norm_"+idx+f"_missing{missing_ratio}_gtmask{extra_info}.pickle")
 		else:
-			newpath = (f"data/{model_name}_"+idx+f"_missing{missing_ratio}_gtmask{extra_info}.pickle")
+			newpath = (f"data/{self.model_name}/{self.model_name}_"+idx+f"_missing{missing_ratio}_gtmask{extra_info}.pickle")
 		if not os.path.isfile(newpath):  # if datasetfile is none, create
 
-			observed_values, mask = self.build_mask(f'data/crossroad_data_{idx}.pickle', missing_ratio, use_index_list)
+			observed_values, mask = self.build_mask(f'data/{self.model_name}/{self.model_name}_data_{idx}.pickle', missing_ratio, use_index_list)
 				
 			self.observed_values = observed_values
 			self.observed_masks = np.ones(observed_values.shape)#mask
@@ -121,10 +121,10 @@ def get_dataloader(model_name, eval_length, target_dim, seed=1, nfold=None, batc
 	train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=1)
 	
 	test_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='test', scaling_flag=scaling_flag, train_ds = train_dataset)
-	test_loader = DataLoader(test_dataset, batch_size=200, shuffle=0)
+	test_loader = DataLoader(test_dataset, batch_size=300, shuffle=0)
 
 	calibr_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='calibr', scaling_flag=scaling_flag, train_ds = train_dataset)
-	calibr_loader = DataLoader(calibr_dataset, batch_size=200, shuffle=0)
+	calibr_loader = DataLoader(calibr_dataset, batch_size=300, shuffle=0)
 
 	return train_loader, test_loader, calibr_loader
 
@@ -132,13 +132,28 @@ def get_dataloader(model_name, eval_length, target_dim, seed=1, nfold=None, batc
 def get_train_dataloader(model_name, train_dataset, eval_length, target_dim, seed=1, nfold=None, batch_size=16, missing_ratio=0.1, scaling_flag = False, extra_info = ''):
 
 	dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='train', scaling_flag=scaling_flag)
-	loader = DataLoader(dataset, batch_size=900, shuffle=0)
+	loader = DataLoader(dataset, batch_size=3000, shuffle=0)
 
 	return loader
 
 def get_calibr_dataloader(model_name, train_dataset, eval_length, target_dim, seed=1, nfold=None, batch_size=16, missing_ratio=0.1, scaling_flag = False, extra_info = ''):
 
 	calibr_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='calibr', scaling_flag=scaling_flag, train_ds = train_dataset, extra_info = extra_info)
-	calibr_loader = DataLoader(calibr_dataset, batch_size=200, shuffle=0)
+	calibr_loader = DataLoader(calibr_dataset, batch_size=300, shuffle=0)
 
 	return calibr_loader
+
+def get_test_calibr_dataloader(model_name, eval_length, target_dim, seed=1, nfold=None, batch_size=1, missing_ratio=0.1, scaling_flag = False, extra_info = '', nsample=1):
+
+	train_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='train', scaling_flag=scaling_flag)
+	
+	test_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='test', scaling_flag=scaling_flag, train_ds = train_dataset, extra_info = extra_info)
+	test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=0)
+
+	calibr_dataset = Dataset(model_name=model_name, target_dim=target_dim, eval_length=eval_length, missing_ratio=missing_ratio, seed=seed, idx='calibr', scaling_flag=scaling_flag, train_ds = train_dataset, extra_info = extra_info)
+	calibr_loader = DataLoader(calibr_dataset, batch_size=batch_size, shuffle=0)
+	
+	test_batch_loader = DataLoader(test_dataset, batch_size=batch_size*nsample, shuffle=1)
+	cal_batch_loader = DataLoader(calibr_dataset, batch_size=batch_size*nsample, shuffle=1)
+
+	return test_loader, calibr_loader, test_batch_loader, cal_batch_loader
